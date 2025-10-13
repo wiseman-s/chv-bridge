@@ -1,4 +1,8 @@
-streamlit
+streamlit==1.39.0
 pandas
 plotly
+scikit-learn
+prophet
+matplotlib
+pyarrow
 reportlab

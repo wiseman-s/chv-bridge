@@ -4,7 +4,14 @@ import pandas as pd
 import os
 from datetime import datetime
 
-DATA_FILE = "data/visits.csv"
+# --------------------------
+# Setup data folder & file
+# --------------------------
+DATA_DIR = "data"
+DATA_FILE = os.path.join(DATA_DIR, "visits.csv")
+
+# ensure folder exists (fixes Streamlit Cloud error)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # --------------------------
 # Counties list (Kenya)
@@ -23,6 +30,7 @@ KENYA_COUNTIES = [
 # Load visits
 # --------------------------
 def load_visits():
+    """Load visits CSV or create empty file if missing."""
     if not os.path.exists(DATA_FILE):
         # create empty dataframe if none exists
         df = pd.DataFrame(columns=["CHV", "Client", "VisitType", "County", "Date", "Notes"])
@@ -37,15 +45,17 @@ def load_visits():
 # Save a single visit row
 # --------------------------
 def save_visit(row: dict):
+    """Append one new record to visits.csv."""
     df = load_visits()
     new_row = pd.DataFrame([row])
     df = pd.concat([df, new_row], ignore_index=True)
     df.to_csv(DATA_FILE, index=False)
 
 # --------------------------
-# Filtered visits
+# Filter visits
 # --------------------------
 def get_filtered_visits(df, start_date, end_date, visit_types=None, counties=None):
+    """Filter dataframe by date range, visit type, and county."""
     if df.empty:
         return df
     filtered = df.copy()

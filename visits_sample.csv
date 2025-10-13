@@ -1,0 +1,10 @@
+CHV,Client,VisitType,Date,Notes
+Alice,Client A,Home Visit,2025-09-01,Routine check
+Bob,Client B,Immunization,2025-09-02,Child immunized
+Alice,Client C,ANC Visit,2025-09-03,2nd trimester
+Charles,Client D,Nutrition Check,2025-09-05,Advice given
+Bob,Client E,Home Visit,2025-09-06,Follow-up
+Diana,Client F,Immunization,2025-09-07,MMR
+Alice,Client G,Immunization,2025-09-10,Polio
+Charles,Client H,Home Visit,2025-09-12,Elderly care
+Diana,Client I,ANC Visit,2025-09-15,Initial visit

@@ -98,7 +98,7 @@ st.markdown(
 # Sidebar / Navigation
 # ----------------------
 st.sidebar.title("🏥 Community Health Volunteer Bridge")
-st.sidebar.caption("Connecting communities with reliable health insights.")
+st.sidebar.caption("Connecting communities with reliable health insights and nurturing informed communities.")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
@@ -222,7 +222,12 @@ if page == "Home":
     st.markdown(
         """
         A unified platform empowering Community Health Volunteers to record visits, analyze incentives,
-        and run predictive forecasts. All changes are temporary and stored only for this session.
+        and run predictive forecasts enabling data-driven decision-making for improved community health outcomes.
+        Through CHV Bridge, you can:
+    - 🏠 Log household visits and capture essential health data  
+    - 📊 Visualize trends and analyze incentive performance  
+    - 🤖 Generate predictive insights to forecast community needs  
+    - 🧾 Export summaries and reports for easy sharing 
         """
     )
     st.info("Tip: Use Data Manager → add/edit rows (quick), then explore Analytics and Predictive Insights.")

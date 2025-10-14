@@ -512,7 +512,7 @@ elif page == "Predictive Insights":
 
         # Basic sanity checks
         if series.empty or len(series) < 5:
-            st.info("Insufficient data for reliable modeling (need at least 5 days aggregated). Add more visits to improve accuracy.")
+            st.info("Insufficient data for reliable modeling . Add more visits to improve accuracy.")
         else:
             series.columns = ["Date", "Incentive"]
             series["Date"] = pd.to_datetime(series["Date"], errors="coerce")

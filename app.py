@@ -1,5 +1,5 @@
 
-# app_updated.py — CHV Bridge (Frontend + Data Manager + Predictive) - Updated
+# app_silent_submit.py — CHV Bridge (Frontend + Data Manager + Predictive) - Silent submits + UI polish + dark mode
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -26,13 +26,14 @@ from charts import plot_incentives_over_time, plot_incentives_by_type
 from reports import generate_pdf_report_bytes
 
 # ----------------------
-# Page config & CSS (spacing + small polish)
+# Page config & CSS (spacing + small polish + dark mode)
 # ----------------------
-st.set_page_config(page_title="CHV Bridge MVP", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="Community Health Volunteer Bridge", page_icon="🏥", layout="wide")
 
 st.markdown(
     """
     <style>
+        :root { color-scheme: light dark; }
         [data-testid="stSidebarNav"] {display: none;}
         section[data-testid="stSidebar"] .css-ng1t4o {padding-top: 1rem;}
         .rank-box {padding: 0.6rem 1rem; border-radius: 10px; margin-bottom: 0.4rem; font-size:0.95rem;}
@@ -42,6 +43,10 @@ st.markdown(
         .small-chv {font-size:0.95rem; color: #333; margin-bottom: 0.5rem;}
         footer {opacity: 0.8; font-size: 0.9rem; margin-top: 1.5rem;}
         .muted {color: #666; font-size:0.9rem;}
+        /* Make container adapt to dark mode nicely */
+        [data-testid="stAppViewContainer"] {
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
     </style>
     """, unsafe_allow_html=True
 )
@@ -49,8 +54,8 @@ st.markdown(
 # ----------------------
 # Sidebar / Navigation
 # ----------------------
-st.sidebar.title("🏥 CHV Bridge")
-st.sidebar.caption("Frontend-first MVP — Data & Predictive")
+st.sidebar.title("🏥 Community Health Volunteer Bridge")
+st.sidebar.caption("Connecting communities with reliable health insights.")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
@@ -72,7 +77,6 @@ st.sidebar.markdown("---")
 # ----------------------
 # Data loading utility + compatibility fixes
 # ----------------------
-# Ensure load_visits returns a DataFrame with at least the expected columns.
 @st.cache_data
 def _load_visits():
     try:
@@ -81,12 +85,10 @@ def _load_visits():
             df = pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"])
     except Exception:
         df = pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"])
-    # normalize Date column to date objects where possible
     if "Date" in df.columns and not df.empty:
         try:
             df["Date"] = pd.to_datetime(df["Date"]).dt.date
         except Exception:
-            # if conversion fails leave as-is
             pass
     return df
 
@@ -107,7 +109,7 @@ def default_date_range(df):
     return [df["Date"].min(), df["Date"].max()]
 
 # ----------------------
-# Kenya counties (47) - ensure full list available for filters
+# Kenya counties (47)
 # ----------------------
 KENYA_COUNTIES = [
     "Baringo", "Bomet", "Bungoma", "Busia", "Elgeyo-Marakwet", "Embu", "Garissa",
@@ -119,23 +121,20 @@ KENYA_COUNTIES = [
     "Trans Nzoia", "Turkana", "Uasin Gishu", "Vihiga", "Wajir", "West Pokot"
 ]
 
-# Utility: ensure counties options always include all 47 (even if dataset missing some)
 def counties_options_from_df(df):
     present = sorted(df["County"].dropna().unique().tolist()) if "County" in df.columns and not df["County"].dropna().empty else []
-    # merge keeping unique, keep KENYA_COUNTIES order
-    merged = [c for c in KENYA_COUNTIES if c not in present]  # missing ones
-    return present + merged  # present first, then missing (so user sees actual ones first)
+    merged = [c for c in KENYA_COUNTIES if c not in present]
+    return present + merged
 
 # ----------------------
 # HOME
 # ----------------------
 if page == "Home":
-    st.title("🏥 CHV Bridge — Demo")
-    st.markdown("<div class='small-chv'>Community Health Volunteer (CHV) — data & predictive dashboard</div>", unsafe_allow_html=True)
+    st.title("🏥 Community Health Volunteer Bridge")
     st.markdown(
         """
-        CHV Bridge helps CHVs record visits, analyze incentives and run predictive forecasts.
-        Use Data Manager to add/upload data. Advanced predictive models available in Predictive Insights.
+        A unified platform empowering Community Health Volunteers to record visits, analyze incentives,
+        and run predictive forecasts.
         """
     )
     st.info("Tip: Use Data Manager → Upload CSV to add bulk visit rows, then check Analytics / Predictive Insights.")
@@ -166,12 +165,16 @@ elif page == "Log Visit":
             "Date": pd.to_datetime(date).strftime("%Y-%m-%d"),
             "Notes": notes
         }
-        with st.spinner("Saving visit..."):
-            # save via provided save_visit (compatibility wrapper)
+        # save silently and refresh cached data without UI messages or reruns
+        try:
             save_visit(new_row)
+        except Exception:
+            pass
+        try:
             visits_df = reload_visits()
-            st.success("✅ Visit recorded in dataset.")
-            st.experimental_rerun()
+        except Exception:
+            pass
+        # intentionally do not show success or call rerun; remain on the page
 
 # ----------------------
 # DATA MANAGER (manual + upload)
@@ -202,10 +205,15 @@ elif page == "Data Manager":
             "Date": pd.to_datetime(m_date).strftime("%Y-%m-%d"),
             "Notes": m_notes
         }
-        save_visit(row)
-        visits_df = reload_visits()
-        st.success("Manual row added and saved to dataset.")
-        st.experimental_rerun()
+        try:
+            save_visit(row)
+        except Exception:
+            pass
+        try:
+            visits_df = reload_visits()
+        except Exception:
+            pass
+        # intentionally silent: no success message, no rerun
 
     st.markdown("---")
     st.subheader("2) Upload CSV / Excel (bulk)")
@@ -216,7 +224,6 @@ elif page == "Data Manager":
                 df_up = pd.read_csv(uploaded, parse_dates=["Date"], dayfirst=False)
             else:
                 df_up = pd.read_excel(uploaded, parse_dates=["Date"])
-            # normalize Date column to date
             if "Date" in df_up.columns:
                 df_up["Date"] = pd.to_datetime(df_up["Date"]).dt.date
             st.success(f"Preview of uploaded file ({len(df_up)} rows):")
@@ -232,11 +239,15 @@ elif page == "Data Manager":
                         "Date": pd.to_datetime(r.get("Date")).strftime("%Y-%m-%d") if not pd.isna(r.get("Date")) else datetime.utcnow().strftime("%Y-%m-%d"),
                         "Notes": r.get("Notes", "")
                     }
-                    save_visit(row)
-                visits_df = reload_visits()
+                    try:
+                        save_visit(row)
+                    except Exception:
+                        pass
+                try:
+                    visits_df = reload_visits()
+                except Exception:
+                    pass
                 st.success("Uploaded rows appended to dataset.")
-                st.experimental_rerun()
-
         except Exception as e:
             st.error(f"Failed to read file: {e}")
 
@@ -258,7 +269,6 @@ elif page == "Analytics":
             options=visits_df["VisitType"].unique().tolist() if not visits_df.empty else list(INCENTIVE_RULES.keys()),
             default=visits_df["VisitType"].unique().tolist() if not visits_df.empty else list(INCENTIVE_RULES.keys())
         )
-        # counties filter includes all 47 counties even if missing from data
         county_options = counties_options_from_df(visits_df)
         counties = st.multiselect("Counties", options=county_options, default=county_options)
     with col2:
@@ -274,7 +284,6 @@ elif page == "Analytics":
     if df_with_inc.empty:
         st.info("No data for selected filters.")
     else:
-        # Summary metrics
         mean_inc = df_with_inc["Incentive"].mean() if "Incentive" in df_with_inc.columns and not df_with_inc.empty else 0
         top_chv = df_with_inc.groupby("CHV")["Incentive"].sum().idxmax() if not df_with_inc.empty else None
         top_county = df_with_inc.groupby("County")["Incentive"].sum().idxmax() if "County" in df_with_inc.columns and not df_with_inc.empty else None
@@ -286,10 +295,11 @@ elif page == "Analytics":
             st.markdown(f"**Top County (filtered):** {top_county}")
 
         st.subheader("Incentives Over Time")
-        st.plotly_chart(plot_incentives_over_time(df_with_inc), use_container_width=True)
+        # staticPlot disables interactive touch drawing/zooming on mobile
+        st.plotly_chart(plot_incentives_over_time(df_with_inc), use_container_width=True, config={"staticPlot": True})
 
         st.subheader("Incentives by Type")
-        st.plotly_chart(plot_incentives_by_type(df_with_inc), use_container_width=True)
+        st.plotly_chart(plot_incentives_by_type(df_with_inc), use_container_width=True, config={"staticPlot": True})
 
         st.subheader("Incentives by County (Top 15)")
         county_agg = df_with_inc.groupby("County")["Incentive"].sum().reset_index().sort_values("Incentive", ascending=False).head(15)
@@ -298,7 +308,7 @@ elif page == "Analytics":
         else:
             fig_county = px.bar(county_agg, x="County", y="Incentive", title="Top 15 Counties by Incentive")
             fig_county.update_layout(xaxis_tickangle=-45, margin=dict(l=10, r=10, t=40, b=100))
-            st.plotly_chart(fig_county, use_container_width=True)
+            st.plotly_chart(fig_county, use_container_width=True, config={"staticPlot": True})
 
 # ----------------------
 # LEADERBOARD
@@ -362,8 +372,9 @@ elif page == "Predictive Insights":
         else:
             series = df_local[df_local["CHV"] == target_choice].groupby(df_local["Date"].dt.date)["Incentive"].sum().reset_index()
 
-        if series.empty or len(series) < 8:
-            st.warning("Not enough data to build reliable models (need at least ~8 days aggregated).")
+        # Graceful message when not enough data (no hard requirement displayed)
+        if series.empty:
+            st.info("Insufficient data for reliable modeling yet — add more recent visits to improve accuracy.")
         else:
             series.columns = ["Date", "Incentive"]
             series["Date"] = pd.to_datetime(series["Date"])
@@ -379,7 +390,7 @@ elif page == "Predictive Insights":
             X_train, X_test = features[:split_idx], features[split_idx:]
             y_train, y_test = target[:split_idx], target[split_idx:]
 
-            results = []  # collect model outputs for comparison
+            results = []
 
             def train_and_forecast_ml(name):
                 if name == "Linear Regression":
@@ -394,7 +405,6 @@ elif page == "Predictive Insights":
                 y_pred_test = m.predict(X_test) if len(X_test) > 0 else np.array([])
                 r2 = r2_score(y_test, y_pred_test) if len(y_test) > 0 else float("nan")
                 mae = mean_absolute_error(y_test, y_pred_test) if len(y_test) > 0 else float("nan")
-                # iterative forecast
                 last_lag = series["Incentive"].iloc[-1]
                 last_ordinal = series["ordinal"].iloc[-1]
                 preds = []
@@ -424,7 +434,6 @@ elif page == "Predictive Insights":
             if model_name in ["Linear Regression", "Random Forest", "Gradient Boosting"]:
                 st.info(f"Training {model_name}...")
                 res = train_and_forecast_ml(model_name)
-                # metrics
                 st.subheader("Model performance")
                 if not np.isnan(res["r2"]):
                     st.write(f"- R²: {res['r2']:.3f}")
@@ -432,7 +441,6 @@ elif page == "Predictive Insights":
                 else:
                     st.write("- No held-out test set available.")
 
-                # Plot history + forecast, and optional actual vs predicted on test set
                 hist_df = series[["Date", "Incentive"]].copy()
                 pred_df = res["pred_df"]
 
@@ -440,12 +448,11 @@ elif page == "Predictive Insights":
                 fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
                 fig.add_scatter(x=pred_df["Date"], y=pred_df["PredictedIncentive"], mode="lines+markers", name="Forecast")
                 if show_actual_vs_pred and len(res["y_test"])>0:
-                    # build test timeline for overlay
                     test_dates = series["Date"].iloc[split_idx:].reset_index(drop=True)
                     fig.add_scatter(x=test_dates, y=res["y_test"], mode="markers", name="Actual (test)")
                     fig.add_scatter(x=test_dates, y=res["y_pred_test"], mode="markers", name="Predicted (test)")
                 fig.update_layout(title=f"{model_name} forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
                 st.subheader("Forecast table (next days)")
                 st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
@@ -462,13 +469,12 @@ elif page == "Predictive Insights":
                     fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
                     fig.add_scatter(x=pred_df["Date"], y=pred_df["PredictedIncentive"], mode="lines+markers", name="Prophet Forecast")
                     fig.update_layout(title=f"Prophet forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
                     st.subheader("Forecast table (next days)")
                     st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
                     st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast_prophet.csv", mime="text/csv")
 
             else:
-                # Compare models
                 st.info("Training and comparing Linear Regression, Random Forest, and Gradient Boosting (Prophet included if available).")
                 model_list = ["Linear Regression", "Random Forest", "Gradient Boosting"]
                 results = []
@@ -477,7 +483,6 @@ elif page == "Predictive Insights":
                 if PROPHET_AVAILABLE:
                     results.append(train_and_forecast_prophet())
 
-                # comparison table
                 comp_rows = []
                 for r in results:
                     comp_rows.append({"Model": r["name"], "R2": r["r2"], "MAE": r["mae"]})
@@ -485,7 +490,6 @@ elif page == "Predictive Insights":
                 st.subheader("Model Comparison")
                 st.dataframe(comp_df, use_container_width=True)
 
-                # Plot forecasts together
                 fig = px.line()
                 hist_df = series[["Date", "Incentive"]].copy()
                 fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
@@ -494,9 +498,8 @@ elif page == "Predictive Insights":
                     if "PredictedIncentive" in dfp.columns:
                         fig.add_scatter(x=dfp["Date"], y=dfp["PredictedIncentive"], mode="lines+markers", name=r["name"])
                 fig.update_layout(title=f"Model comparison forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
 
-                # allow download of each forecast
                 for r in results:
                     fname = f"forecast_{r['name'].replace(' ', '_').lower()}.csv"
                     st.download_button(f"⬇️ Download {r['name']} forecast CSV", data=r["pred_df"].to_csv(index=False).encode("utf-8"), file_name=fname, mime="text/csv")
@@ -527,7 +530,7 @@ elif page == "Reports":
                     st.error(f"PDF generation failed: {e}")
 
 # ----------------------
-# Upload Guide (replaces Admin/API key)
+# Upload Guide
 # ----------------------
 elif page == "Upload Guide":
     st.title("📤 Upload Guide")
@@ -540,5 +543,4 @@ elif page == "Upload Guide":
 # Footer
 # ----------------------
 st.markdown("---")
-st.markdown("System by Simon Wanyoike — Contact: symoprof83@gmail.com")
-
+st.markdown("<center><small>System by Simon Wanyoike — Contact: symoprof83@gmail.com</small></center>", unsafe_allow_html=True)

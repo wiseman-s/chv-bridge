@@ -34,7 +34,12 @@ except Exception:
         if df is None or df.empty:
             return df
         df = df.copy()
+        # Map VisitType to incentive, ensure numeric Incentive column exists
         df["Incentive"] = df.get("VisitType", pd.Series([""] * len(df))).map(INCENTIVE_RULES).fillna(0)
+        try:
+            df["Incentive"] = pd.to_numeric(df["Incentive"], errors="coerce").fillna(0)
+        except Exception:
+            df["Incentive"] = df["Incentive"].astype(float)
         return df
 
 # charts & reports modules may provide nicer plots; if absent use inline versions
@@ -45,7 +50,7 @@ except Exception:
         if df is None or df.empty:
             return px.line()
         df2 = df.copy()
-        df2["Date"] = pd.to_datetime(df2["Date"])
+        df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce")
         daily = df2.groupby(df2["Date"].dt.date)["Incentive"].sum().reset_index()
         daily["Date"] = pd.to_datetime(daily["Date"])
         fig = px.line(daily, x="Date", y="Incentive", markers=True, title="Incentives Over Time")
@@ -149,6 +154,7 @@ def get_visits_df():
     for col in ["CHV","Client","County","VisitType","Date","Notes"]:
         if col not in df.columns:
             df[col] = "" if col != "Date" else pd.NaT
+    # ensure Incentive column if present later
     return df.reset_index(drop=True)
 
 def set_visits_df(df):
@@ -171,7 +177,10 @@ def set_visits_df(df):
         return empty_text and date_empty
 
     # keep rows that are not empty
-    df_clean = df[~df.apply(is_row_empty, axis=1)].copy()
+    if df.empty:
+        df_clean = pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"])
+    else:
+        df_clean = df[~df.apply(is_row_empty, axis=1)].copy()
     # reindex
     df_clean = df_clean.reset_index(drop=True)
     # ensure trailing blank row exists
@@ -188,12 +197,19 @@ def set_visits_df(df):
     st.session_state.session_visits = df_final.reset_index(drop=True)
 
 def default_date_range(df):
-    if df.empty or "Date" not in df.columns or df["Date"].dropna().empty:
+    if df is None or df.empty or "Date" not in df.columns or df["Date"].dropna().empty:
         today = datetime.utcnow().date()
         return [today - timedelta(days=30), today]
-    dmin = pd.to_datetime(df["Date"]).dt.date.min()
-    dmax = pd.to_datetime(df["Date"]).dt.date.max()
-    return [dmin, dmax]
+    try:
+        dmin = pd.to_datetime(df["Date"]).dt.date.min()
+        dmax = pd.to_datetime(df["Date"]).dt.date.max()
+        if pd.isna(dmin) or pd.isna(dmax):
+            today = datetime.utcnow().date()
+            return [today - timedelta(days=30), today]
+        return [dmin, dmax]
+    except Exception:
+        today = datetime.utcnow().date()
+        return [today - timedelta(days=30), today]
 
 # ensure session dataset has trailing blank row at start
 set_visits_df(get_visits_df())
@@ -241,14 +257,34 @@ elif page == "Log Visit":
         # append and persist in session (no permanent save)
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         set_visits_df(df)
-        # remain on page silently
+        st.success("Visit added to session dataset.")
+
+    # Show current session dataset below the form (editable)
+    st.markdown("**Below is data entered manually in this session (editable).**")
+    df_show = get_visits_df()
+    # ensure columns exist
+    for col in ["CHV","Client","County","VisitType","Date","Notes"]:
+        if col not in df_show.columns:
+            df_show[col] = "" if col != "Date" else pd.NaT
+    # enforce trailing blank row
+    set_visits_df(df_show)
+    try:
+        edited = st.data_editor(get_visits_df(), num_rows="dynamic", use_container_width=True, key="data_editor_log_visit")
+        if "Date" in edited.columns:
+            try:
+                edited["Date"] = pd.to_datetime(edited["Date"], errors="coerce")
+            except Exception:
+                pass
+        set_visits_df(edited)
+    except Exception:
+        st.dataframe(get_visits_df(), use_container_width=True)
 
 # ----------------------
 # DATA MANAGER (editable grid, upload CSV to append, add-row & clear)
 # ----------------------
 elif page == "Data Manager":
     st.title("📥 Data Manager — Manual entry & Upload")
-    st.markdown("Add and edit data directly in the table below (preferred). You can also upload a CSV to append. All changes are temporary (session-only).")
+    st.markdown("Showing data entered manually on Log Visit (editable). You can also upload a CSV to append. All changes are temporary (session-only).")
 
     # top controls: add row, upload CSV (append), clear
     c1, c2, c3 = st.columns([1,1,1])
@@ -323,6 +359,15 @@ elif page == "Analytics":
         else:
             df_with_inc["Date"] = pd.NaT
 
+        # ensure Incentive numeric
+        if "Incentive" not in df_with_inc.columns:
+            df_with_inc["Incentive"] = 0
+        else:
+            try:
+                df_with_inc["Incentive"] = pd.to_numeric(df_with_inc["Incentive"], errors="coerce").fillna(0)
+            except Exception:
+                pass
+
         default_start, default_end = default_date_range(df_with_inc)
         col1, col2 = st.columns([3,1])
         with col1:
@@ -393,6 +438,13 @@ elif page == "Leaderboard":
         st.info("No visits found.")
     else:
         df_with_inc = add_incentives_column(visits_df.copy())
+        if "Incentive" in df_with_inc.columns:
+            try:
+                df_with_inc["Incentive"] = pd.to_numeric(df_with_inc["Incentive"], errors="coerce").fillna(0)
+            except Exception:
+                pass
+        else:
+            df_with_inc["Incentive"] = 0
         leaderboard = df_with_inc.groupby("CHV", as_index=False)["Incentive"].sum().sort_values("Incentive", ascending=False)
         if not leaderboard.empty:
             leaderboard.insert(0, "Rank", range(1, len(leaderboard) + 1))
@@ -444,140 +496,187 @@ elif page == "Predictive Insights":
             st.error("No Date column present in dataset.")
             df_local["Date"] = pd.NaT
 
+        # ensure Incentive column exists and numeric
+        if "Incentive" not in df_local.columns:
+            df_local["Incentive"] = 0
+        else:
+            try:
+                df_local["Incentive"] = pd.to_numeric(df_local["Incentive"], errors="coerce").fillna(0)
+            except Exception:
+                pass
+
         if target_choice == "Overall (all CHVs aggregated)":
             series = df_local.groupby(df_local["Date"].dt.date)["Incentive"].sum().reset_index()
         else:
             series = df_local[df_local["CHV"] == target_choice].groupby(df_local["Date"].dt.date)["Incentive"].sum().reset_index()
 
-        if series.empty:
-            st.info("Insufficient data for reliable modeling yet — add more recent visits to improve accuracy.")
+        # Basic sanity checks
+        if series.empty or len(series) < 5:
+            st.info("Insufficient data for reliable modeling (need at least 5 days aggregated). Add more visits to improve accuracy.")
         else:
             series.columns = ["Date", "Incentive"]
-            series["Date"] = pd.to_datetime(series["Date"])
-            series = series.sort_values("Date").reset_index(drop=True)
+            series["Date"] = pd.to_datetime(series["Date"], errors="coerce")
+            series = series.dropna(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+            # After dropna, check length again
+            if series.empty or len(series) < 5:
+                st.info("Insufficient valid dated records for modeling (need at least 5).")
+            else:
+                series["ordinal"] = series["Date"].map(lambda x: x.toordinal())
+                series["lag1"] = series["Incentive"].shift(1).fillna(method="bfill")
+                # ensure numeric arrays safe
+                try:
+                    features = series[["ordinal", "lag1"]].astype(float).values
+                except Exception:
+                    features = np.array(series[["ordinal", "lag1"]].values, dtype=float)
+                target = pd.to_numeric(series["Incentive"], errors="coerce").fillna(0).values
 
-            series["ordinal"] = series["Date"].map(lambda x: x.toordinal())
-            series["lag1"] = series["Incentive"].shift(1).fillna(method="bfill")
-            features = series[["ordinal", "lag1"]].values
-            target = series["Incentive"].values
+                split_idx = int(len(series) * train_ratio)
+                X_train, X_test = features[:split_idx], features[split_idx:]
+                y_train, y_test = target[:split_idx], target[split_idx:]
 
-            split_idx = int(len(series) * train_ratio)
-            X_train, X_test = features[:split_idx], features[split_idx:]
-            y_train, y_test = target[:split_idx], target[split_idx:]
+                results = []
 
-            results = []
+                def train_and_forecast_ml(name):
+                    # Guard: need non-empty training data
+                    if len(X_train) == 0 or len(y_train) == 0:
+                        return {"name": name, "model": None, "r2": float("nan"), "mae": float("nan"), "pred_df": pd.DataFrame(), "y_test": np.array([]), "y_pred_test": np.array([])}
+                    if name == "Linear Regression":
+                        m = LinearRegression()
+                    elif name == "Random Forest":
+                        m = RandomForestRegressor(n_estimators=200, random_state=42)
+                    elif name == "Gradient Boosting":
+                        m = GradientBoostingRegressor(n_estimators=200, random_state=42)
+                    else:
+                        raise ValueError("Unknown model: " + str(name))
+                    try:
+                        m.fit(X_train, y_train)
+                    except Exception as e:
+                        st.warning(f"{name} failed to train: {e}")
+                        return {"name": name, "model": None, "r2": float("nan"), "mae": float("nan"), "pred_df": pd.DataFrame(), "y_test": y_test, "y_pred_test": np.array([])}
+                    y_pred_test = m.predict(X_test) if len(X_test) > 0 else np.array([])
+                    r2 = r2_score(y_test, y_pred_test) if len(y_test) > 0 and len(y_pred_test) == len(y_test) else float("nan")
+                    mae = mean_absolute_error(y_test, y_pred_test) if len(y_test) > 0 and len(y_pred_test) == len(y_test) else float("nan")
+                    last_lag = series["Incentive"].iloc[-1]
+                    last_ordinal = series["ordinal"].iloc[-1]
+                    preds = []
+                    prev = last_lag
+                    for i in range(1, periods + 1):
+                        ordv = last_ordinal + i
+                        Xf = np.array([[ordv, prev]])
+                        try:
+                            p = m.predict(Xf)[0]
+                        except Exception:
+                            p = prev  # conservative fallback
+                        preds.append(max(0, float(p)))
+                        prev = p
+                    future_dates = [series["Date"].iloc[-1] + timedelta(days=i) for i in range(1, periods + 1)]
+                    pred_df = pd.DataFrame({"Date": future_dates, "PredictedIncentive": preds})
+                    return {"name": name, "model": m, "r2": r2, "mae": mae, "pred_df": pred_df, "y_test": y_test, "y_pred_test": y_pred_test}
 
-            def train_and_forecast_ml(name):
-                if name == "Linear Regression":
-                    m = LinearRegression()
-                elif name == "Random Forest":
-                    m = RandomForestRegressor(n_estimators=200, random_state=42)
-                elif name == "Gradient Boosting":
-                    m = GradientBoostingRegressor(n_estimators=200, random_state=42)
+                def train_and_forecast_prophet():
+                    prophet_df = series[["Date", "Incentive"]].rename(columns={"Date": "ds", "Incentive": "y"})
+                    m = Prophet()
+                    try:
+                        with st.spinner("Training Prophet..."):
+                            m.fit(prophet_df)
+                    except Exception as e:
+                        st.warning(f"Prophet training failed: {e}")
+                        return {"name": "Prophet", "model": None, "r2": float("nan"), "mae": float("nan"), "pred_df": pd.DataFrame()}
+                    future = m.make_future_dataframe(periods=periods)
+                    forecast = m.predict(future)
+                    forecast_future = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods)
+                    pred_df = forecast_future.rename(columns={"ds": "Date", "yhat": "PredictedIncentive", "yhat_lower": "Lower", "yhat_upper": "Upper"})
+                    return {"name": "Prophet", "model": m, "r2": float("nan"), "mae": float("nan"), "pred_df": pred_df}
+
+                # Single model selection
+                if model_name in ["Linear Regression", "Random Forest", "Gradient Boosting"]:
+                    st.info(f"Training {model_name}...")
+                    res = train_and_forecast_ml(model_name)
+                    st.subheader("Model performance")
+                    if res.get("model") is None:
+                        st.write("- Model training failed or insufficient training data.")
+                    else:
+                        if not np.isnan(res["r2"]):
+                            st.write(f"- R²: {res['r2']:.3f}")
+                            st.write(f"- MAE: {res['mae']:.2f}")
+                        else:
+                            st.write("- No held-out test set available or insufficient test data.")
+
+                    hist_df = series[["Date", "Incentive"]].copy()
+                    pred_df = res["pred_df"] if "pred_df" in res else pd.DataFrame()
+
+                    fig = px.line()
+                    fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
+                    if not pred_df.empty:
+                        fig.add_scatter(x=pred_df["Date"], y=pred_df["PredictedIncentive"], mode="lines+markers", name="Forecast")
+                    if show_actual_vs_pred and res.get("y_test") is not None and len(res.get("y_test"))>0:
+                        try:
+                            test_dates = series["Date"].iloc[split_idx:].reset_index(drop=True)
+                            fig.add_scatter(x=test_dates, y=res["y_test"], mode="markers", name="Actual (test)")
+                            fig.add_scatter(x=test_dates, y=res["y_pred_test"], mode="markers", name="Predicted (test)")
+                        except Exception:
+                            pass
+                    fig.update_layout(title=f"{model_name} forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
+                    st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
+
+                    st.subheader("Forecast table (next days)")
+                    if not pred_df.empty:
+                        st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
+                        st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast.csv", mime="text/csv")
+                    else:
+                        st.info("No forecast available from this model.")
+
+                elif model_name == "Prophet":
+                    if not PROPHET_AVAILABLE:
+                        st.error("Prophet is not installed. Run pip install prophet to enable.")
+                    else:
+                        res = train_and_forecast_prophet()
+                        pred_df = res["pred_df"]
+                        fig = px.line()
+                        hist_df = series[["Date", "Incentive"]].copy()
+                        fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
+                        if not pred_df.empty:
+                            fig.add_scatter(x=pred_df["Date"], y=pred_df["PredictedIncentive"], mode="lines+markers", name="Prophet Forecast")
+                        fig.update_layout(title=f"Prophet forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
+                        st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
+                        st.subheader("Forecast table (next days)")
+                        if not pred_df.empty:
+                            st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
+                            st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast_prophet.csv", mime="text/csv")
+                        else:
+                            st.info("No forecast available from Prophet.")
+
                 else:
-                    raise ValueError("Unknown model: " + str(name))
-                m.fit(X_train, y_train)
-                y_pred_test = m.predict(X_test) if len(X_test) > 0 else np.array([])
-                r2 = r2_score(y_test, y_pred_test) if len(y_test) > 0 else float("nan")
-                mae = mean_absolute_error(y_test, y_pred_test) if len(y_test) > 0 else float("nan")
-                last_lag = series["Incentive"].iloc[-1]
-                last_ordinal = series["ordinal"].iloc[-1]
-                preds = []
-                prev = last_lag
-                for i in range(1, periods + 1):
-                    ordv = last_ordinal + i
-                    Xf = np.array([[ordv, prev]])
-                    p = m.predict(Xf)[0]
-                    preds.append(max(0, p))
-                    prev = p
-                future_dates = [series["Date"].iloc[-1] + timedelta(days=i) for i in range(1, periods + 1)]
-                pred_df = pd.DataFrame({"Date": future_dates, "PredictedIncentive": preds})
-                return {"name": name, "model": m, "r2": r2, "mae": mae, "pred_df": pred_df, "y_test": y_test, "y_pred_test": y_pred_test}
+                    st.info("Training and comparing Linear Regression, Random Forest, and Gradient Boosting (Prophet included if available).")
+                    model_list = ["Linear Regression", "Random Forest", "Gradient Boosting"]
+                    results = []
+                    for mn in model_list:
+                        results.append(train_and_forecast_ml(mn))
+                    if PROPHET_AVAILABLE:
+                        results.append(train_and_forecast_prophet())
 
-            def train_and_forecast_prophet():
-                prophet_df = series[["Date", "Incentive"]].rename(columns={"Date": "ds", "Incentive": "y"})
-                m = Prophet()
-                with st.spinner("Training Prophet..."):
-                    m.fit(prophet_df)
-                future = m.make_future_dataframe(periods=periods)
-                forecast = m.predict(future)
-                forecast_future = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(periods)
-                pred_df = forecast_future.rename(columns={"ds": "Date", "yhat": "PredictedIncentive", "yhat_lower": "Lower", "yhat_upper": "Upper"})
-                return {"name": "Prophet", "model": m, "r2": float("nan"), "mae": float("nan"), "pred_df": pred_df}
+                    comp_rows = []
+                    for r in results:
+                        comp_rows.append({"Model": r.get("name"), "R2": r.get("r2"), "MAE": r.get("mae")})
+                    comp_df = pd.DataFrame(comp_rows)
+                    st.subheader("Model Comparison")
+                    st.dataframe(comp_df, use_container_width=True)
 
-            # Single model selection
-            if model_name in ["Linear Regression", "Random Forest", "Gradient Boosting"]:
-                st.info(f"Training {model_name}...")
-                res = train_and_forecast_ml(model_name)
-                st.subheader("Model performance")
-                if not np.isnan(res["r2"]):
-                    st.write(f"- R²: {res['r2']:.3f}")
-                    st.write(f"- MAE: {res['mae']:.2f}")
-                else:
-                    st.write("- No held-out test set available.")
-
-                hist_df = series[["Date", "Incentive"]].copy()
-                pred_df = res["pred_df"]
-
-                fig = px.line()
-                fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
-                fig.add_scatter(x=pred_df["Date"], y=pred_df["PredictedIncentive"], mode="lines+markers", name="Forecast")
-                if show_actual_vs_pred and len(res["y_test"])>0:
-                    test_dates = series["Date"].iloc[split_idx:].reset_index(drop=True)
-                    fig.add_scatter(x=test_dates, y=res["y_test"], mode="markers", name="Actual (test)")
-                    fig.add_scatter(x=test_dates, y=res["y_pred_test"], mode="markers", name="Predicted (test)")
-                fig.update_layout(title=f"{model_name} forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
-                st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
-
-                st.subheader("Forecast table (next days)")
-                st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
-                st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast.csv", mime="text/csv")
-
-            elif model_name == "Prophet":
-                if not PROPHET_AVAILABLE:
-                    st.error("Prophet is not installed. Run pip install prophet to enable.")
-                else:
-                    res = train_and_forecast_prophet()
-                    pred_df = res["pred_df"]
                     fig = px.line()
                     hist_df = series[["Date", "Incentive"]].copy()
                     fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
-                    fig.add_scatter(x=pred_df["Date"], y=pred_df["PredictedIncentive"], mode="lines+markers", name="Prophet Forecast")
-                    fig.update_layout(title=f"Prophet forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
+                    for r in results:
+                        dfp = r.get("pred_df", pd.DataFrame())
+                        if dfp is not None and not dfp.empty and "PredictedIncentive" in dfp.columns:
+                            fig.add_scatter(x=dfp["Date"], y=dfp["PredictedIncentive"], mode="lines+markers", name=r.get("name"))
+                    fig.update_layout(title=f"Model comparison forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
                     st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
-                    st.subheader("Forecast table (next days)")
-                    st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
-                    st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast_prophet.csv", mime="text/csv")
 
-            else:
-                st.info("Training and comparing Linear Regression, Random Forest, and Gradient Boosting (Prophet included if available).")
-                model_list = ["Linear Regression", "Random Forest", "Gradient Boosting"]
-                results = []
-                for mn in model_list:
-                    results.append(train_and_forecast_ml(mn))
-                if PROPHET_AVAILABLE:
-                    results.append(train_and_forecast_prophet())
-
-                comp_rows = []
-                for r in results:
-                    comp_rows.append({"Model": r["name"], "R2": r["r2"], "MAE": r["mae"]})
-                comp_df = pd.DataFrame(comp_rows)
-                st.subheader("Model Comparison")
-                st.dataframe(comp_df, use_container_width=True)
-
-                fig = px.line()
-                hist_df = series[["Date", "Incentive"]].copy()
-                fig.add_scatter(x=hist_df["Date"], y=hist_df["Incentive"], mode="lines+markers", name="Historical")
-                for r in results:
-                    dfp = r["pred_df"]
-                    if "PredictedIncentive" in dfp.columns:
-                        fig.add_scatter(x=dfp["Date"], y=dfp["PredictedIncentive"], mode="lines+markers", name=r["name"])
-                fig.update_layout(title=f"Model comparison forecast for {target_choice}", xaxis_title="Date", yaxis_title="Incentives (KES)")
-                st.plotly_chart(fig, use_container_width=True, config={"staticPlot": True})
-
-                for r in results:
-                    fname = f"forecast_{r['name'].replace(' ', '_').lower()}.csv"
-                    st.download_button(f"⬇️ Download {r['name']} forecast CSV", data=r["pred_df"].to_csv(index=False).encode("utf-8"), file_name=fname, mime="text/csv")
+                    for r in results:
+                        dfp = r.get("pred_df", pd.DataFrame())
+                        if dfp is not None and not dfp.empty:
+                            fname = f"forecast_{r['name'].replace(' ', '_').lower()}.csv"
+                            st.download_button(f"⬇️ Download {r['name']} forecast CSV", data=dfp.to_csv(index=False).encode("utf-8"), file_name=fname, mime="text/csv")
 
 # ----------------------
 # REPORTS
@@ -589,8 +688,11 @@ elif page == "Reports":
         st.info("No data to export for selected filters.")
     else:
         df_with_inc = add_incentives_column(visits_df.copy())
-        csv_bytes = df_with_inc.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download Visits CSV", data=csv_bytes, file_name=f"chv_visits_session.csv", mime="text/csv")
+        try:
+            csv_bytes = df_with_inc.to_csv(index=False).encode("utf-8")
+            st.download_button("⬇️ Download Visits CSV", data=csv_bytes, file_name=f"chv_visits_session.csv", mime="text/csv")
+        except Exception as e:
+            st.error(f"Failed to prepare CSV: {e}")
         if generate_pdf_report_bytes is not None:
             if st.button("📑 Generate PDF Summary"):
                 with st.spinner("Creating PDF..."):

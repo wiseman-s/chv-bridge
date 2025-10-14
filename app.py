@@ -1,4 +1,5 @@
-# app_final_v3.py — CHV Bridge (Frontend + Data Manager + Predictive) - Temporary session-only, editable Data Manager, mobile-safe charts
+# app_final_v4.py — CHV Bridge (Frontend + Data Manager + Predictive)
+# Temporary session-only, editable Data Manager, mobile-safe charts
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -18,7 +19,6 @@ except Exception:
     PROPHET_AVAILABLE = False
 
 # Local modules (kept for compatibility; not used for persistence)
-# If these modules are missing, the app will still work because persistence is session-only.
 try:
     from incentives import INCENTIVE_RULES, add_incentives_column
 except Exception:
@@ -34,7 +34,6 @@ except Exception:
         if df is None or df.empty:
             return df
         df = df.copy()
-        # if VisitType missing, create zero incentives
         df["Incentive"] = df.get("VisitType", pd.Series([""] * len(df))).map(INCENTIVE_RULES).fillna(0)
         return df
 
@@ -83,7 +82,6 @@ st.markdown(
         .small-chv {font-size:0.95rem; color: #333; margin-bottom: 0.5rem;}
         footer {opacity: 0.8; font-size: 0.9rem; margin-top: 1.5rem;}
         .muted {color: #666; font-size:0.9rem;}
-        /* Make container adapt to dark mode nicely */
         [data-testid="stAppViewContainer"] {
             transition: background-color 0.3s ease, color 0.3s ease;
         }
@@ -136,40 +134,69 @@ def counties_options_from_df(df):
 # Session-only dataset initialization (empty by default)
 # ----------------------
 if "session_visits" not in st.session_state:
-    # start with an empty temporary dataset for this session
     st.session_state.session_visits = pd.DataFrame(columns=["CHV", "Client", "County", "VisitType", "Date", "Notes"])
 
-# handy alias used across the app (always reflect session state)
+# helpers to manage session dataset and trailing blank row
 def get_visits_df():
     df = st.session_state.session_visits.copy()
-    # ensure Date column exists and typed consistently
+    # Ensure Date typed consistently (datetime)
     if "Date" in df.columns and not df.empty:
         try:
-            df["Date"] = pd.to_datetime(df["Date"])
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         except Exception:
             pass
-    return df
+    # ensure required columns exist
+    for col in ["CHV","Client","County","VisitType","Date","Notes"]:
+        if col not in df.columns:
+            df[col] = "" if col != "Date" else pd.NaT
+    return df.reset_index(drop=True)
 
 def set_visits_df(df):
-    # normalize Date to datetime or keep as-is
     df = df.copy()
+    # normalize columns and types
+    for col in ["CHV","Client","County","VisitType","Notes"]:
+        if col not in df.columns:
+            df[col] = ""
     if "Date" in df.columns:
         try:
-            df["Date"] = pd.to_datetime(df["Date"])
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
         except Exception:
             pass
-    st.session_state.session_visits = df.reset_index(drop=True)
+    else:
+        df["Date"] = pd.NaT
+    # drop fully-empty rows except keep one blank trailing row
+    def is_row_empty(r):
+        empty_text = all([(pd.isna(r.get(c)) or str(r.get(c)).strip()=="") for c in ["CHV","Client","County","VisitType","Notes"]])
+        date_empty = pd.isna(r.get("Date"))
+        return empty_text and date_empty
 
-visits_df = get_visits_df()
+    # keep rows that are not empty
+    df_clean = df[~df.apply(is_row_empty, axis=1)].copy()
+    # reindex
+    df_clean = df_clean.reset_index(drop=True)
+    # ensure trailing blank row exists
+    blank_row = {"CHV":"", "Client":"", "County":"", "VisitType":"", "Date":pd.NaT, "Notes":""}
+    if df_clean.empty:
+        df_final = pd.DataFrame([blank_row])
+    else:
+        last = df_clean.iloc[-1]
+        last_empty = ( (pd.isna(last.get("Date")) or str(last.get("Date")).strip()=="") and all([ (str(last.get(c)).strip()=="") for c in ["CHV","Client","County","VisitType","Notes"] ]) )
+        if last_empty:
+            df_final = df_clean
+        else:
+            df_final = pd.concat([df_clean, pd.DataFrame([blank_row])], ignore_index=True)
+    st.session_state.session_visits = df_final.reset_index(drop=True)
 
 def default_date_range(df):
-    if df.empty or "Date" not in df.columns:
+    if df.empty or "Date" not in df.columns or df["Date"].dropna().empty:
         today = datetime.utcnow().date()
         return [today - timedelta(days=30), today]
-    # ensure date-only for defaults
     dmin = pd.to_datetime(df["Date"]).dt.date.min()
     dmax = pd.to_datetime(df["Date"]).dt.date.max()
     return [dmin, dmax]
+
+# ensure session dataset has trailing blank row at start
+set_visits_df(get_visits_df())
 
 # ----------------------
 # HOME
@@ -182,7 +209,7 @@ if page == "Home":
         and run predictive forecasts. All changes are temporary and stored only for this session.
         """
     )
-    st.info("Tip: Use Data Manager → upload or edit your dataset, then explore Analytics and Predictive Insights.")
+    st.info("Tip: Use Data Manager → add/edit rows (quick), then explore Analytics and Predictive Insights.")
 
 # ----------------------
 # LOG VISIT (adds to session-only dataset)
@@ -202,7 +229,6 @@ elif page == "Log Visit":
         submitted = st.form_submit_button("Add Visit (session only)")
 
     if submitted:
-        # require at least CHV and VisitType and Date to add
         new_row = {
             "CHV": chv.strip(),
             "Client": client.strip(),
@@ -211,55 +237,35 @@ elif page == "Log Visit":
             "Date": pd.to_datetime(date),
             "Notes": notes
         }
-        # append to session dataset (temporary)
         df = get_visits_df()
+        # append and persist in session (no permanent save)
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         set_visits_df(df)
-        # silent: no rerun, no persistent save
+        # remain on page silently
 
 # ----------------------
-# DATA MANAGER (editable grid, upload/replace/append/clear)
+# DATA MANAGER (editable grid, upload CSV to append, add-row & clear)
 # ----------------------
 elif page == "Data Manager":
     st.title("📥 Data Manager — Manual entry & Upload")
-    st.markdown("Upload, edit, append or clear your session dataset. All changes are temporary and stored only for this browser session.")
+    st.markdown("Add and edit data directly in the table below (preferred). You can also upload a CSV to append. All changes are temporary (session-only).")
 
-    # Top control panel: Replace upload, Append upload, Save session (no-op confirmation), Clear with confirmation
+    # top controls: add row, upload CSV (append), clear
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
-        uploaded_replace = st.file_uploader("Upload dataset to replace session dataset (CSV or XLSX)", type=["csv", "xlsx"], key="replace_uploader")
-        if uploaded_replace is not None:
-            if st.button("📂 Replace session dataset with uploaded file"):
-                try:
-                    if uploaded_replace.name.lower().endswith(".csv"):
-                        df_new = pd.read_csv(uploaded_replace, parse_dates=["Date"], dayfirst=False)
-                    else:
-                        df_new = pd.read_excel(uploaded_replace, parse_dates=["Date"])
-                    # ensure columns exist
-                    for col in ["CHV","Client","County","VisitType","Date","Notes"]:
-                        if col not in df_new.columns:
-                            df_new[col] = ""
-                    # normalize date
-                    if "Date" in df_new.columns:
-                        df_new["Date"] = pd.to_datetime(df_new["Date"], errors="coerce")
-                    set_visits_df(df_new)
-                    visits_df = get_visits_df()
-                    st.success(f"Session dataset replaced with uploaded file ({len(df_new)} rows).")
-                except Exception as e:
-                    st.error(f"Failed to load uploaded file: {e}")
-
+        if st.button("➕ Add empty row"):
+            df_tmp = get_visits_df()
+            df_tmp = pd.concat([df_tmp, pd.DataFrame([{"CHV":"","Client":"","County":"","VisitType":"","Date":pd.NaT,"Notes":""}])], ignore_index=True)
+            set_visits_df(df_tmp)
     with c2:
-        uploaded_append = st.file_uploader("Upload dataset to append to session (CSV or XLSX)", type=["csv", "xlsx"], key="append_uploader")
-        if uploaded_append is not None:
-            if st.button("➕ Append uploaded rows to session dataset"):
+        uploaded = st.file_uploader("Upload CSV to append (only CSV)", type=["csv"], key="upload_csv_append")
+        if uploaded is not None:
+            if st.button("Append CSV"):
                 try:
-                    if uploaded_append.name.lower().endswith(".csv"):
-                        df_up = pd.read_csv(uploaded_append, parse_dates=["Date"], dayfirst=False)
-                    else:
-                        df_up = pd.read_excel(uploaded_append, parse_dates=["Date"])
+                    df_up = pd.read_csv(uploaded, parse_dates=["Date"], dayfirst=False)
                     for col in ["CHV","Client","County","VisitType","Date","Notes"]:
                         if col not in df_up.columns:
-                            df_up[col] = ""
+                            df_up[col] = "" if col != "Date" else pd.NaT
                     if "Date" in df_up.columns:
                         df_up["Date"] = pd.to_datetime(df_up["Date"], errors="coerce")
                     df_current = get_visits_df()
@@ -267,40 +273,40 @@ elif page == "Data Manager":
                     set_visits_df(df_concat)
                     st.success(f"Appended {len(df_up)} rows to session dataset.")
                 except Exception as e:
-                    st.error(f"Failed to append file: {e}")
-
+                    st.error(f"Failed to append CSV: {e}")
     with c3:
-        if st.button("💾 Save dataset for this session"):
-            st.success("Dataset saved in session memory (temporary).")
-
-        if st.button("🗑️ Clear session dataset"):
-            # confirmation step
-            if st.checkbox("Yes — I understand this will clear the session dataset", key="confirm_clear"):
+        if st.button("🗑️ Clear all session data"):
+            confirm = st.checkbox("Yes — clear all session data", key="confirm_clear_all")
+            if confirm:
                 set_visits_df(pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"]))
                 st.success("Session dataset cleared.")
 
     st.markdown("---")
     st.subheader("Current dataset (editable)")
-    # show editable grid where user can edit, add, delete rows inline
     df_show = get_visits_df()
-    # ensure columns present
+    # ensure columns exist
     for col in ["CHV","Client","County","VisitType","Date","Notes"]:
         if col not in df_show.columns:
-            df_show[col] = ""
+            df_show[col] = "" if col != "Date" else pd.NaT
 
-    # Use Streamlit data editor for inline editing (dynamic rows)
+    # ensure trailing blank row exists before editing
+    df_show = df_show.copy()
+    set_visits_df(df_show)  # this will enforce trailing blank row
+
+    # data_editor for inline editing (dynamic)
     try:
-        edited = st.data_editor(df_show, num_rows="dynamic", use_container_width=True, key="data_editor_visits")
-        # keep Date as datetime where possible
+        edited = st.data_editor(get_visits_df(), num_rows="dynamic", use_container_width=True, key="data_editor_visits")
+        # normalize Date
         if "Date" in edited.columns:
             try:
                 edited["Date"] = pd.to_datetime(edited["Date"], errors="coerce")
             except Exception:
                 pass
+        # save edits to session, keeping one trailing blank row
         set_visits_df(edited)
     except Exception:
-        # fallback if st.data_editor not available
-        st.dataframe(df_show, use_container_width=True)
+        # fallback to non-editable view if data_editor unavailable
+        st.dataframe(get_visits_df(), use_container_width=True)
 
 # ----------------------
 # ANALYTICS
@@ -308,12 +314,10 @@ elif page == "Data Manager":
 elif page == "Analytics":
     st.title("📈 Incentive Analytics")
     visits_df = get_visits_df()
-    if visits_df.empty:
+    if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No data to analyze. Please add or upload data in Data Manager.")
     else:
-        # ensure Incentive column
         df_with_inc = add_incentives_column(visits_df.copy())
-        # normalize Date
         if "Date" in df_with_inc.columns:
             df_with_inc["Date"] = pd.to_datetime(df_with_inc["Date"], errors="coerce")
         else:
@@ -332,7 +336,7 @@ elif page == "Analytics":
             counties = st.multiselect("Counties", options=county_options, default=county_options)
         with col2:
             st.metric("Total Visits (dataset)", int(len(df_with_inc)))
-            # filter
+            # apply filters
             df_filtered = df_with_inc.copy()
             # date filter
             try:
@@ -352,7 +356,6 @@ elif page == "Analytics":
         if df_filtered.empty:
             st.info("No data after applying filters.")
         else:
-            # summary metrics
             mean_inc = df_filtered["Incentive"].mean() if "Incentive" in df_filtered.columns else 0
             top_chv = df_filtered.groupby("CHV")["Incentive"].sum().idxmax() if not df_filtered.empty and "CHV" in df_filtered.columns else None
             top_county = df_filtered.groupby("County")["Incentive"].sum().idxmax() if not df_filtered.empty and "County" in df_filtered.columns else None
@@ -386,7 +389,7 @@ elif page == "Analytics":
 elif page == "Leaderboard":
     st.title("🏆 CHV Leaderboard")
     visits_df = get_visits_df()
-    if visits_df.empty:
+    if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No visits found.")
     else:
         df_with_inc = add_incentives_column(visits_df.copy())
@@ -422,7 +425,7 @@ elif page == "Predictive Insights":
         """
     )
     visits_df = get_visits_df()
-    if visits_df.empty:
+    if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No data available for modeling. Add data under Data Manager first.")
     else:
         model_choices = ["Linear Regression", "Random Forest", "Gradient Boosting"]
@@ -453,7 +456,6 @@ elif page == "Predictive Insights":
             series["Date"] = pd.to_datetime(series["Date"])
             series = series.sort_values("Date").reset_index(drop=True)
 
-            # features for ML
             series["ordinal"] = series["Date"].map(lambda x: x.toordinal())
             series["lag1"] = series["Incentive"].shift(1).fillna(method="bfill")
             features = series[["ordinal", "lag1"]].values
@@ -478,7 +480,6 @@ elif page == "Predictive Insights":
                 y_pred_test = m.predict(X_test) if len(X_test) > 0 else np.array([])
                 r2 = r2_score(y_test, y_pred_test) if len(y_test) > 0 else float("nan")
                 mae = mean_absolute_error(y_test, y_pred_test) if len(y_test) > 0 else float("nan")
-                # iterative forecast
                 last_lag = series["Incentive"].iloc[-1]
                 last_ordinal = series["ordinal"].iloc[-1]
                 preds = []
@@ -584,10 +585,9 @@ elif page == "Predictive Insights":
 elif page == "Reports":
     st.title("📄 Reports & Export")
     visits_df = get_visits_df()
-    if visits_df.empty:
+    if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No data to export for selected filters.")
     else:
-        # attempt to add incentives column for exports
         df_with_inc = add_incentives_column(visits_df.copy())
         csv_bytes = df_with_inc.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Download Visits CSV", data=csv_bytes, file_name=f"chv_visits_session.csv", mime="text/csv")
@@ -607,7 +607,7 @@ elif page == "Reports":
 # ----------------------
 elif page == "Upload Guide":
     st.title("📤 Upload Guide")
-    st.markdown("This guide explains how to prepare and upload your CSV/Excel files. Use the Data Manager page to upload or edit data for the current session.")
+    st.markdown("This guide explains how to prepare and upload your CSV files. Use the Data Manager page to add or edit data for the current session.")
     st.markdown("Expected columns: `CHV, Client, County, VisitType, Date, Notes` — Date format `YYYY-MM-DD` recommended.")
     st.markdown("Need help? Contact: **symoprof83@gmail.com**")
 

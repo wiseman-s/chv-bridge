@@ -8,7 +8,7 @@ def generate_pdf_report_bytes(df):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     c.setFont("Helvetica-Bold", 14)
-    c.drawString(40, height - 40, "CHV Bridge — Summary Report (Demo)")
+    c.drawString(40, height - 40, "CHV Bridge — Summary Report ")
     c.setFont("Helvetica", 10)
     y = height - 80
     total_visits = len(df)

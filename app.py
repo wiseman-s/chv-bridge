@@ -1,5 +1,6 @@
 
-# app_silent_submit.py — CHV Bridge (Frontend + Data Manager + Predictive) - Silent submits + UI polish + dark mode
+
+# app_final_v2.py — CHV Bridge (Frontend + Data Manager + Predictive) - Session dataset controls + silent submits + UI polish + dark mode
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -100,7 +101,18 @@ def reload_visits():
         pass
     return _load_visits()
 
-visits_df = _load_visits()
+# load base persistent dataset (if available)
+_persistent_visits = _load_visits()
+
+# ----------------------
+# Session dataset (temporary) — used throughout the app after this point
+# ----------------------
+if "session_visits" not in st.session_state:
+    # initialize session dataset from persistent storage (if any)
+    st.session_state.session_visits = _persistent_visits.copy() if _persistent_visits is not None else pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"])
+
+# alias for ease of use in the rest of the script
+visits_df = st.session_state.session_visits
 
 def default_date_range(df):
     if df.empty or "Date" not in df.columns:
@@ -165,25 +177,57 @@ elif page == "Log Visit":
             "Date": pd.to_datetime(date).strftime("%Y-%m-%d"),
             "Notes": notes
         }
-        # save silently and refresh cached data without UI messages or reruns
+        # save silently to persistent storage (keeps original behavior for Log Visit)
         try:
             save_visit(new_row)
         except Exception:
             pass
+        # also update session dataset so UI reflects new row immediately
         try:
-            visits_df = reload_visits()
+            st.session_state.session_visits = reload_visits()
         except Exception:
             pass
         # intentionally do not show success or call rerun; remain on the page
 
 # ----------------------
-# DATA MANAGER (manual + upload)
+# DATA MANAGER (manual + upload) with session controls
 # ----------------------
 elif page == "Data Manager":
     st.title("📥 Data Manager — Manual entry & Upload")
-    st.markdown("You can add a single visit manually, or upload a CSV/Excel with visit rows.")
-    st.markdown("Expected columns (CSV/Excel): `CHV,Client,County,VisitType,Date,Notes` (Date like YYYY-MM-DD)")
+    st.markdown("You can add a single visit manually, or upload a CSV/Excel with visit rows. Changes here are temporary for this session.")
 
+    # top control panel: Upload Replace, Save (session), Clear (with confirmation)
+    c1, c2, c3 = st.columns([1,1,1])
+    with c1:
+        uploaded_replace = st.file_uploader("Upload dataset to replace session dataset", type=["csv","xlsx"], key="replace_uploader")
+        if uploaded_replace is not None:
+            if st.button("📂 Replace session dataset with uploaded file"):
+                try:
+                    if uploaded_replace.name.endswith(".csv"):
+                        df_new = pd.read_csv(uploaded_replace, parse_dates=["Date"], dayfirst=False)
+                    else:
+                        df_new = pd.read_excel(uploaded_replace, parse_dates=["Date"])
+                    if "Date" in df_new.columns:
+                        df_new["Date"] = pd.to_datetime(df_new["Date"]).dt.date
+                    st.session_state.session_visits = df_new.reset_index(drop=True)
+                    visits_df = st.session_state.session_visits
+                    st.success(f"Session dataset replaced with uploaded file ({len(df_new)} rows).")
+                except Exception as e:
+                    st.error(f"Failed to load uploaded file: {e}")
+    with c2:
+        if st.button("💾 Save current dataset to session"):
+            # "save" just confirms dataset will persist during this session (no disk write)
+            st.success("Current dataset saved for this session.")
+    with c3:
+        clear_clicked = st.button("🗑️ Clear session dataset")
+        if clear_clicked:
+            confirm = st.checkbox("Yes, I want to clear the session dataset (this cannot be undone during this session)", key="confirm_clear")
+            if confirm:
+                st.session_state.session_visits = pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"])
+                visits_df = st.session_state.session_visits
+                st.success("Session dataset cleared.")
+
+    st.markdown("---")
     st.subheader("1) Manual entry")
     with st.form("manual_entry", clear_on_submit=True):
         m_col1, m_col2 = st.columns(2)
@@ -195,7 +239,7 @@ elif page == "Data Manager":
             m_visit_type = st.selectbox("Visit Type", options=list(INCENTIVE_RULES.keys()), key="m_visit")
             m_date = st.date_input("Visit Date", value=datetime.utcnow().date(), key="m_date")
             m_notes = st.text_area("Notes (optional)", key="m_notes")
-        add_btn = st.form_submit_button("Add row to dataset")
+        add_btn = st.form_submit_button("Add row to session dataset")
     if add_btn:
         row = {
             "CHV": m_chv,
@@ -205,19 +249,19 @@ elif page == "Data Manager":
             "Date": pd.to_datetime(m_date).strftime("%Y-%m-%d"),
             "Notes": m_notes
         }
+        # append to session dataset only (temporary)
         try:
-            save_visit(row)
+            df_tmp = st.session_state.session_visits.copy()
+            df_tmp = df_tmp.append(row, ignore_index=True) if not df_tmp.empty else pd.DataFrame([row])
+            st.session_state.session_visits = df_tmp.reset_index(drop=True)
+            visits_df = st.session_state.session_visits
+            # silent: no success message, no rerun
         except Exception:
             pass
-        try:
-            visits_df = reload_visits()
-        except Exception:
-            pass
-        # intentionally silent: no success message, no rerun
 
     st.markdown("---")
-    st.subheader("2) Upload CSV / Excel (bulk)")
-    uploaded = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
+    st.subheader("2) Upload CSV / Excel (bulk, append to session)")
+    uploaded = st.file_uploader("Upload CSV or Excel to append", type=["csv", "xlsx"], key="append_uploader")
     if uploaded is not None:
         try:
             if uploaded.name.endswith(".csv"):
@@ -226,33 +270,18 @@ elif page == "Data Manager":
                 df_up = pd.read_excel(uploaded, parse_dates=["Date"])
             if "Date" in df_up.columns:
                 df_up["Date"] = pd.to_datetime(df_up["Date"]).dt.date
-            st.success(f"Preview of uploaded file ({len(df_up)} rows):")
             st.dataframe(df_up.head(), use_container_width=True)
-
-            if st.button("Append uploaded rows to dataset"):
-                for _, r in df_up.iterrows():
-                    row = {
-                        "CHV": r.get("CHV", ""),
-                        "Client": r.get("Client", ""),
-                        "County": r.get("County", "") if "County" in r else "",
-                        "VisitType": r.get("VisitType", ""),
-                        "Date": pd.to_datetime(r.get("Date")).strftime("%Y-%m-%d") if not pd.isna(r.get("Date")) else datetime.utcnow().strftime("%Y-%m-%d"),
-                        "Notes": r.get("Notes", "")
-                    }
-                    try:
-                        save_visit(row)
-                    except Exception:
-                        pass
-                try:
-                    visits_df = reload_visits()
-                except Exception:
-                    pass
-                st.success("Uploaded rows appended to dataset.")
+            if st.button("Append uploaded rows to session dataset"):
+                df_current = st.session_state.session_visits.copy()
+                df_concat = pd.concat([df_current, df_up], ignore_index=True) if not df_current.empty else df_up.copy()
+                st.session_state.session_visits = df_concat.reset_index(drop=True)
+                visits_df = st.session_state.session_visits
+                st.success(f"Appended {len(df_up)} rows to session dataset.")
         except Exception as e:
             st.error(f"Failed to read file: {e}")
 
     st.markdown("---")
-    st.subheader("Current dataset (sample)")
+    st.subheader("Current dataset")
     st.dataframe(visits_df.head(200), use_container_width=True)
 
 # ----------------------

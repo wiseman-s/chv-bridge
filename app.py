@@ -242,7 +242,7 @@ elif page == "Log Visit":
         with col1:
             chv = st.text_input("CHV Name", value="")
             client = st.text_input("Client Name", value="")
-            county = st.selectbox("County", KENYA_COUNTIES, index=KENYA_COUNTIES.index("Migori") if "Migori" in KENYA_COUNTIES else 0)
+            county = st.selectbox("County", KENYA_COUNTIES, index=KENYA_COUNTIES.index("Kiambu") if "Kiambu" in KENYA_COUNTIES else 0)
         with col2:
             visit_type = st.selectbox("Visit Type", options=list(INCENTIVE_RULES.keys()) if isinstance(INCENTIVE_RULES, dict) else [])
             date = st.date_input("Visit Date", value=datetime.utcnow().date())

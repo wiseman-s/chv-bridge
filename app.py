@@ -72,7 +72,7 @@ except Exception:
 # ----------------------
 # Page config & CSS
 # ----------------------
-st.set_page_config(page_title="Community Health Volunteer Bridge", page_icon="🏥", layout="wide")
+st.set_page_config(page_title="Community Health Volunteer Bridge", page_icon="", layout="wide")
 
 st.markdown(
     """
@@ -97,12 +97,12 @@ st.markdown(
 # ----------------------
 # Sidebar / Navigation
 # ----------------------
-st.sidebar.title("🏥 Community Health Volunteer Bridge")
+st.sidebar.title("Community Health Volunteer Bridge")
 st.sidebar.caption("Connecting communities with reliable health insights and nurturing informed communities.")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
-    "📍 Navigate",
+    "Navigate",
     [
         "Home",
         "Log Visit",
@@ -218,16 +218,16 @@ set_visits_df(get_visits_df())
 # HOME
 # ----------------------
 if page == "Home":
-    st.title("🏥 Community Health Volunteer Bridge")
+    st.title("Community Health Volunteer Bridge")
     st.markdown(
         """
         A unified platform empowering Community Health Volunteers to record visits, analyze incentives,
         and run predictive forecasts enabling data-driven decision-making for improved community health outcomes.
         Through CHV Bridge, you can:
-    - 🏠 Log household visits and capture essential health data  
-    - 📊 Visualize trends and analyze incentive performance  
-    - 🤖 Generate predictive insights to forecast community needs  
-    - 🧾 Export summaries and reports for easy sharing 
+    - Log household visits and capture essential health data  
+    - Visualize trends and analyze incentive performance  
+    - Generate predictive insights to forecast community needs  
+    - Export summaries and reports for easy sharing 
         """
     )
     st.info("Tip: Use Data Manager → add/edit rows (quick), then explore Analytics and Predictive Insights.")
@@ -236,7 +236,7 @@ if page == "Home":
 # LOG VISIT (adds to session-only dataset)
 # ----------------------
 elif page == "Log Visit":
-    st.title("📝 Log a Health Visit")
+    st.title("Log a Health Visit")
     with st.form("visit_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
@@ -288,13 +288,13 @@ elif page == "Log Visit":
 # DATA MANAGER (editable grid, upload CSV to append, add-row & clear)
 # ----------------------
 elif page == "Data Manager":
-    st.title("📥 Data Manager — Manual entry & Upload")
+    st.title("Data Manager — Manual entry & Upload")
     st.markdown("Showing data entered manually on Log Visit (editable). You can also upload a CSV to append. All changes are temporary (session-only).")
 
     # top controls: add row, upload CSV (append), clear
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
-        if st.button("➕ Add empty row"):
+        if st.button("Add empty row"):
             df_tmp = get_visits_df()
             df_tmp = pd.concat([df_tmp, pd.DataFrame([{"CHV":"","Client":"","County":"","VisitType":"","Date":pd.NaT,"Notes":""}])], ignore_index=True)
             set_visits_df(df_tmp)
@@ -316,7 +316,7 @@ elif page == "Data Manager":
                 except Exception as e:
                     st.error(f"Failed to append CSV: {e}")
     with c3:
-        if st.button("🗑️ Clear all session data"):
+        if st.button("Clear all session data"):
             confirm = st.checkbox("Yes — clear all session data", key="confirm_clear_all")
             if confirm:
                 set_visits_df(pd.DataFrame(columns=["CHV","Client","County","VisitType","Date","Notes"]))
@@ -353,7 +353,7 @@ elif page == "Data Manager":
 # ANALYTICS
 # ----------------------
 elif page == "Analytics":
-    st.title("📈 Incentive Analytics")
+    st.title("Incentive Analytics")
     visits_df = get_visits_df()
     if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No data to analyze. Please add or upload data in Data Manager.")
@@ -437,7 +437,7 @@ elif page == "Analytics":
 # LEADERBOARD
 # ----------------------
 elif page == "Leaderboard":
-    st.title("🏆 CHV Leaderboard")
+    st.title("CHV Leaderboard")
     visits_df = get_visits_df()
     if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No visits found.")
@@ -453,7 +453,7 @@ elif page == "Leaderboard":
         leaderboard = df_with_inc.groupby("CHV", as_index=False)["Incentive"].sum().sort_values("Incentive", ascending=False)
         if not leaderboard.empty:
             leaderboard.insert(0, "Rank", range(1, len(leaderboard) + 1))
-            medals = ["🥇", "🥈", "🥉"]
+            medals = ["", "", ""]
             st.markdown("### Top Performers")
             for i, row in leaderboard.head(10).iterrows():
                 rank = row["Rank"]
@@ -471,7 +471,7 @@ elif page == "Leaderboard":
 # PREDICTIVE INSIGHTS (Advanced Models + Comparison)
 # ----------------------
 elif page == "Predictive Insights":
-    st.title("🤖 Predictive Insights — Advanced Models")
+    st.title("Predictive Insights — Advanced Models")
     st.markdown(
         """
         Models available:
@@ -627,7 +627,7 @@ elif page == "Predictive Insights":
                     st.subheader("Forecast table (next days)")
                     if not pred_df.empty:
                         st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
-                        st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast.csv", mime="text/csv")
+                        st.download_button("Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast.csv", mime="text/csv")
                     else:
                         st.info("No forecast available from this model.")
 
@@ -647,7 +647,7 @@ elif page == "Predictive Insights":
                         st.subheader("Forecast table (next days)")
                         if not pred_df.empty:
                             st.dataframe(pred_df.reset_index(drop=True), use_container_width=True)
-                            st.download_button("⬇️ Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast_prophet.csv", mime="text/csv")
+                            st.download_button("Download Forecast CSV", data=pred_df.to_csv(index=False).encode("utf-8"), file_name="chv_forecast_prophet.csv", mime="text/csv")
                         else:
                             st.info("No forecast available from Prophet.")
 
@@ -681,13 +681,13 @@ elif page == "Predictive Insights":
                         dfp = r.get("pred_df", pd.DataFrame())
                         if dfp is not None and not dfp.empty:
                             fname = f"forecast_{r['name'].replace(' ', '_').lower()}.csv"
-                            st.download_button(f"⬇️ Download {r['name']} forecast CSV", data=dfp.to_csv(index=False).encode("utf-8"), file_name=fname, mime="text/csv")
+                            st.download_button(f"Download {r['name']} forecast CSV", data=dfp.to_csv(index=False).encode("utf-8"), file_name=fname, mime="text/csv")
 
 # ----------------------
 # REPORTS
 # ----------------------
 elif page == "Reports":
-    st.title("📄 Reports & Export")
+    st.title("Reports & Export")
     visits_df = get_visits_df()
     if visits_df.empty or visits_df.dropna(how="all").empty:
         st.info("No data to export for selected filters.")
@@ -695,15 +695,15 @@ elif page == "Reports":
         df_with_inc = add_incentives_column(visits_df.copy())
         try:
             csv_bytes = df_with_inc.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇️ Download Visits CSV", data=csv_bytes, file_name=f"chv_visits_session.csv", mime="text/csv")
+            st.download_button("Download Visits CSV", data=csv_bytes, file_name=f"chv_visits_session.csv", mime="text/csv")
         except Exception as e:
             st.error(f"Failed to prepare CSV: {e}")
         if generate_pdf_report_bytes is not None:
-            if st.button("📑 Generate PDF Summary"):
+            if st.button("Generate PDF Summary"):
                 with st.spinner("Creating PDF..."):
                     try:
                         pdf_bytes = generate_pdf_report_bytes(df_with_inc)
-                        st.download_button("⬇️ Download PDF", data=pdf_bytes, file_name=f"chv_summary_session.pdf", mime="application/pdf")
+                        st.download_button("Download PDF", data=pdf_bytes, file_name=f"chv_summary_session.pdf", mime="application/pdf")
                     except Exception as e:
                         st.error(f"PDF generation failed: {e}")
         else:
@@ -713,7 +713,7 @@ elif page == "Reports":
 # Upload Guide
 # ----------------------
 elif page == "Upload Guide":
-    st.title("📤 Upload Guide")
+    st.title("Upload Guide")
     st.markdown("This guide explains how to prepare and upload your CSV files. Use the Data Manager page to add or edit data for the current session.")
     st.markdown("Expected columns: `CHV, Client, County, VisitType, Date, Notes` — Date format `YYYY-MM-DD` recommended.")
     st.markdown("Need help? Contact: **symoprof83@gmail.com**")
